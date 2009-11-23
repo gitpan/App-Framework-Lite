@@ -4,7 +4,6 @@ use strict ;
 use Test::More;
 
 use App::Framework::Lite ;
-use App::Framework::Base ;
 
 # VERSION
 our $VERSION = '2.00' ;
@@ -104,8 +103,6 @@ my %NAMED = (
 ) ;
 	
 	plan tests => 2 * 2 * (keys %NAMED) ;
-
-$App::Framework::Base::class_debug = 2 ;
 
 	push @ARGV, ('-opt2', 'this is new') ;
 	App::Framework::Lite->new()->go() ;

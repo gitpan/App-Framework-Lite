@@ -1,5 +1,8 @@
 Revision history for App-Framework-Lite
 
+1.01    Mon Nov 23 09:19:00 2009
+		Various fixes to correct CPAN test failures on other platforms
+	
 1.00    Thu Nov 19 13:45:00 2009
 		New module
 	

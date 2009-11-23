@@ -1,10 +1,12 @@
 App-Framework-Lite
 
-A framework for making script development simpler. The framework does all of the common jobs for you, you just concentrate
-of writing the application itself.
+A (lighter) framework for making script development simpler. The framework does all of the common jobs for you, you just concentrate
+on writing the application itself.
 
-Also provides the facility to embed itself into a script to create a stand-alone script that can be distributed.
+Also provides the facility to embed itself into a script to create a stand-alone version that can be distributed.
 
+In other word, this modules provides the basic facilities of App::Framework, but in a more compact manner that can also be wrapped up
+into a single-file script.
 
 INSTALLATION
 

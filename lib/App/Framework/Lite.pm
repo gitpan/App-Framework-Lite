@@ -929,7 +929,7 @@ use 5.008004;
 use strict ;
 
 
-our $VERSION = "1.00" ;
+our $VERSION = "1.01" ;
 
 
 #============================================================================================
@@ -4276,7 +4276,7 @@ $this->_dbg_prt([" + found $external_name in $package\n"], 2) ;
 		}
 		if ($type eq 'HASH')
 		{
-			if (defined(%alias))
+			if (%alias)
 			{
 				$this->set($field_name => \%alias) ;
 			}
@@ -4367,10 +4367,10 @@ sub _set_paths
 	
 	# Get info
 	my ($progname, $progpath, $progext) = fileparse($filename, '\.[^\.]+') ;
+	$progpath =~ s%\\%/%g ;
+	$progpath =~ s%^(.+)/$%$1%g ;
 	if (ref($this))
 	{
-		$progpath =~ s%\\%/%g ;
-		
 		# set if not class call
 		$this->set(
 			'progname'	=> $progname,

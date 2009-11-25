@@ -8,8 +8,8 @@ use App::Framework::Lite '+Args(open=none)' ;
 # VERSION
 our $VERSION = '2.01' ;
 
-my $DEBUG=5;
-my $VERBOSE=1;
+my $DEBUG=0;
+my $VERBOSE=0;
 
 	my $stdout="" ;
 	my $stderr="" ;

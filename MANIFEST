@@ -8,11 +8,13 @@ inc/Module/Install/Win32.pm
 inc/Module/Install/WriteAll.pm
 
 lib/App/Framework/Lite.pm
+lib/App/Framework/Lite/Object.pm
 Makefile.PL
 MANIFEST			This list of files
 README
 Changes
 
+t/00-AAAA-Object.t
 t/00-Aliases-1.t
 t/00-Aliases-2.t
 t/00-Aliases-3.t
@@ -36,9 +38,17 @@ t/04-ArgsWild.t
 t/05-Data.t
 t/06-pod-coverage.t
 t/07-pod.t
+t/08-embed.t
 t/args/array.txt
 t/args/dir/dummy
 t/args/exists.txt
 t/args/file.txt
+t/embed/lib/MyObj.pm
+t/embed/MyLib.pm
+t/embed/test1.pl
+t/embed/test2.pl
+t/embed/test3.pl
 t/lib/MyAppLib.pm
+t/lib/ObjTest.pm
 t/lib/Test/NoMore.pm
+t/MyApp.pm

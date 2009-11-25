@@ -75,8 +75,6 @@ can also be provided with a script.
 =back
 
 
-
-
 =head2 Using This Module 
 
 The minimum you need is:
@@ -863,12 +861,16 @@ Causes the script to create a standalone version of itself
 
 =item -alf-embed-lib
 
-Also embeds any user library modules (i.e. any 'use'd modules that are located under $progpath/ or $progpath/lib/)
+By default, the script also embeds any user library modules (i.e. any 'use'd modules that are located under $progpath/ or $progpath/lib/).
 
-=item -alf-debug
+Specifying this option set to 0 prevents these modules from being embedded.
 
-Setting this debug option causes the embedded module(s) to be stored with theitr comments and formatting preserved. The default is
-to compress the module as much as possible.
+=item -alf-compress
+
+By default the embedded modules are stored in a compressed format (whitespace and comments removed).
+
+Specifying this option set to 0 prevents these modules from being compressed. If you have any problems with the embedded modules not working, then try setting
+this option to 0 and check the resulting script.
 
 =back 
 
@@ -877,23 +879,22 @@ to compress the module as much as possible.
 If you have a script test.pl that uses App::Framework::Lite and a user module MyLib.pm (stored in the same directory as test.pl), then you
 would create a new, stand-alone script alf-test.pl by running any of the following:
 
-=head4 Embded compressed App::Framework::Lite
+=head4 Embded compressed App::Framework::Lite and user modules
 
 	perl test.pl -alf-embed alf-test.pl
+
+Results in alf-test.pl having the App::Framework::Lite module and MyLib.pm embedded in a compressed version. The script is then completely stand-alone.
+
+=head4 Embded compressed App::Framework::Lite
+
+	perl test.pl -alf-embed alf-test.pl -alf-embed-lib 0
 
 Results in alf-test.pl having the App::Framework::Lite module embedded in a compressed version, but the user module MyLib.pm would need to be
 delivered along with the script for it to work.
 
-=head4 Embded compressed App::Framework::Lite and user modules
-
-	perl test.pl -alf-embed alf-test.pl -alf-embed-lib
-
-Results in alf-test.pl having the App::Framework::Lite module and MyLib.pm embedded in a compressed version. The script is then completely stand-alone.
-
-
 =head4 Embded readable App::Framework::Lite and user modules
 
-	perl test.pl -alf-embed alf-test.pl -alf-embed-lib -alf-debug 1
+	perl test.pl -alf-embed alf-test.pl -alf-compress 0
 
 Results in alf-test.pl having the App::Framework::Lite module and MyLib.pm embedded in a readable version. The script is completely stand-alone,
 but much larger than if the modules had been compressed. This is useful for debugging module problems (especially with a debugger!).
@@ -929,7 +930,7 @@ use 5.008004;
 use strict ;
 
 
-our $VERSION = "1.01" ;
+our $VERSION = "1.02" ;
 
 
 #============================================================================================
@@ -955,26 +956,15 @@ our @ISA ;
 #============================================================================================
 
 my $class_debug ;
-my $EMBEDDED ;
+
+# default to state that the module is embedded (overwritten inside BEGIN block)
+my $EMBEDDED = 0 ;
 
 # Keep track of import info
 my $import_args ;
 
-my %FIELDS ;
-my @DEFAULT_OPTS ;
-my $POD_HEAD ;
-my $POD_OVER ;
-
-
-
-#============================================================================================
-BEGIN {
-	## These are adjusted during module embed
-	$EMBEDDED = 0 ;
-	$VERSION = $VERSION ;
-	
-	## Set up variables
-	%FIELDS = (
+## Set up variables
+my	%FIELDS = (
 		'name'				=> undef,
 		'progname'			=> undef,
 		'progpath'			=> undef,
@@ -1021,10 +1011,10 @@ BEGIN {
 		'exit_type'			=> 'exit',
 	) ;
 
-	$POD_HEAD =	"=head" ;
-	$POD_OVER =	"=over" ;
-	
-	@DEFAULT_OPTS = (
+my $POD_HEAD =	"=head" ;
+my $POD_OVER =	"=over" ;
+
+my @DEFAULT_OPTS = (
 	['debug=i',			'Set debug level', 	'Set the debug level value', ],
 	['v|"verbose"',		'Verbose output',	'Make script output more verbose', ],
 	['dryrun|"norun"',	'Dry run', 			'Do not execute anything that would alter the file system, just show the commands that would have executed'],
@@ -1036,14 +1026,22 @@ BEGIN {
 	['dev:dbg-data-array',	'Debug option: Show all __DATA__ items', 	'Show all processed __DATA__ items then exit' ],
 	['dev:alf-info',	'Module information', 	'Display information about the App::Framework::Lite module then exit' ],
 	['dev:alf-debug=i',	 'Debug App::Framework::Lite', 	'Set the debug level value of the App::Framework::Lite module', ],
+#@NO-EMBED BEGIN
+	['dev:alf-embed=s',		'Embed module', 	'Embed the App::Framework::Lite module into script then exit. Specify the filename of the new script.' ],
+	['dev:alf-embed-lib=i',	'Embed libraries', 	'(Only used when embedding). Embed user modules as well as the App::Framework::Lite module.', 1 ],
+	['dev:alf-compress=i',	'Compress embedded', 	'(Only used when embedding). Compress the embedded modules.', 1 ],
+#@NO-EMBED END
 	) ;
 
+
+
+
+#============================================================================================
+BEGIN {
+
 #@NO-EMBED BEGIN
-	if (!$EMBEDDED)
-	{
-		push @DEFAULT_OPTS, 	['dev:alf-embed=s',		'Embed module', 	'Embed the App::Framework::Lite module into script then exit. Specify the filename of the new script.' ] ;
-		push @DEFAULT_OPTS, 	['dev:alf-embed-lib',	'Embed libraries', 	'(Only used when embedding). Embed user modules as well as the App::Framework::Lite module.' ] ;
-	}
+	# Clear flag for non-embedded
+	$EMBEDDED = 1 ;
 #@NO-EMBED END
 
 	## Get caller information
@@ -1273,7 +1271,10 @@ sub vars
 
 	foreach my $field (keys %FIELDS)
 	{
-		$vars{$field} = $this->{$field} ;
+		if (!ref($this->{$field}) || (ref($this->{$field}) eq 'SCALAR'))
+		{
+			$vars{$field} = $this->{$field} ;
+		}
 	}
 	
 	return %vars ;
@@ -1441,8 +1442,8 @@ sub app_start
 	# NOTE: Need to do this here so that derived objects work properly
 	my $ok = $this->getopts() ;
 	
-	## Expand any variables in the data
-#	$this->_expand_vars() ;
+	## Expand any variables in the application object field values
+	$this->_expand_vars() ;
 
 	# Handle options errors here after expanding variables
 	unless ($ok)
@@ -1523,13 +1524,20 @@ sub app_handle_opts
 	}
 
 #@NO-EMBED BEGIN
-	if ($opts{'alf-embed'} && !$EMBEDDED)
+	if ($opts{'alf-embed'})
 	{
 		my $src = $this->{'filename'} ;
 #		my $dest = $this->{'progpath'} . '/' . "alf-" . $this->{'progname'} . $this->{'progext'} ;
 		my $dest = $opts{'alf-embed'} ;
-		$this->embed($src, $dest, $this->{debug}, $opts{'alf-embed-lib'}) ;
-		print "Embedded App::Framework::Lite into $src. Stand-alone script saved as $dest. Have a nice life.\n" ;
+		my %libs = $this->embed($src, $dest, $opts{'alf-compress'}, $opts{'alf-embed-lib'}) ;
+		print "Embedded App::Framework::Lite into $src. Stand-alone script saved as $dest.\n" ;
+		print "Embedded the following library modules:\n" ;
+		foreach my $mod (sort {$libs{$a}{'order'} <=> $libs{$b}{'order'} } keys %libs)
+		{
+			print "    $mod\n" ;
+		}
+		
+		print "Have a nice life.\n" ;
 		$this->exit(0) ;
 	}
 #@NO-EMBED END
@@ -2489,6 +2497,86 @@ sub args_values_set
 			$arg_entry_href->{'default'} = $values_href->{$arg} ;
 		}
 	}
+}
+
+#----------------------------------------------------------------------------
+#
+#=item B<_expand_vars()>
+#
+#Run through some of the application variables/fields and expand any instances of variables embedded
+#within the values.
+#
+#Example:
+#
+#	__DATA_  
+#
+#	[SYNOPSIS]
+#	
+#	$name [options] <rrd file(s)>
+#
+#Here the 'synopsis' field contains the $name field variable. This needs to be expanded to the value of $name.
+#
+#NOTE: Currently this will NOT cope with cross references (so, if in the above example $name also contains a variable
+#then that variable may or may not be expanded before the synopsis field is processed)
+#
+#
+#=cut
+#
+sub _expand_vars 
+{
+	my $this = shift ;
+
+	# Get hash of fields
+	my %fields = $this->vars() ;
+
+print "_expand_vars()\n" if $this->{'debug'}>=2 ;
+
+	# work through each field, create a list of those that have changed
+	my %changed ;
+	foreach my $field (sort keys %fields)
+	{
+		# Skip non-scalars
+		next if ref($fields{$field}) ;
+
+print " + check $field...\n" if $this->{'debug'}>=2 ;
+		
+		# First see if this contains a '$'
+		$fields{$field} ||= "" ;
+		my $ix = index $fields{$field}, '$' ; 
+		if ($ix >= 0)
+		{
+print " + + got some vars in $field = $fields{$field}\n" if $this->{'debug'}>=2 ;
+			# Do replacement
+			$fields{$field} =~ s{
+								     \$                         # find a literal dollar sign
+								     \{{0,1}					# optional brace
+								    (\w+)                       # find a "word" and store it in $1
+								     \}{0,1}					# optional brace
+								}{
+								    no strict 'refs';           # for $$1 below
+								    if (defined $fields{$1}) {
+								        $fields{$1};            # expand global variables only
+								    } else {
+								        "\${$1}";  				# leave it
+								    }
+								}egx;
+
+
+			# Add to list
+			$changed{$field} = $fields{$field} ;
+
+print " + + $field now = $fields{$field}\n" if $this->{'debug'}>=2 ;
+		}
+	}
+
+	# If some have changed then set them
+	if (keys %changed)
+	{
+		$this->set(%changed) ;
+	}
+
+print "_expand_vars() - done\n" if $this->{'debug'}>=2 ;
+
 }
 
 #----------------------------------------------------------------------------
@@ -3934,9 +4022,43 @@ sub find_lib
 
 
 #@NO-EMBED BEGIN
+
+sub _module_to_embed
+{
+	my $this = shift @_ ;
+	my ($module, $file, $embed_libs) = @_ ;
+	
+	my $embed_it = 0 ;
+
+	## Always embed this module
+	if ($module eq 'App::Framework::Lite')
+	{
+		$embed_it = 1 ;
+	}
+	elsif ($embed_libs)
+	{
+		# is this an App::Framework module
+		if ($module =~ /^App::Framework::Lite/)
+		{
+			$embed_it = 1 ;
+		}
+		else
+		{
+			# is this module under the program directory? i.e. a user module
+			my $regexp = qr($this->{'progpath'}) ;
+			if ($file =~ $regexp)
+			{
+				$embed_it = 1 ;
+			}
+		}
+	}
+
+	return $embed_it ;
+}
+
 #----------------------------------------------------------------------------
 
-=item B< embed($src, $dest, [$no_compress]) >
+=item B< embed($src, $dest, [$compress]) >
 
 Embeds App::Framework::Lite into the script and writes the standalone script out
 
@@ -3945,35 +4067,30 @@ Embeds App::Framework::Lite into the script and writes the standalone script out
 sub embed
 {
 	my $this = shift ;
-	my ($src, $dest, $no_compress, $embed_libs) = @_ ;
-	
-	## get module as a string
-	my $module_str = $this->_module_str('App::Framework::Lite', $no_compress) ;
+	my ($src, $dest, $compress, $embed_libs) = @_ ;
+
+	my %libs ;
+	my %handled_libs ;
+
+print "embed($src, $dest, compress=$compress, embed_libs=$embed_libs)\n" if $this->{'debug'};
 
 	## Handle source
 	open my $in_fh, "<$src" or die "Error: Unable to read $src : $!" ;
 	open my $out_fh, ">$dest" or die "Error: Unable to write $dest : $!" ;
 
-	my %libs ;
 	my $line ;
 	while(defined($line = <$in_fh>))
 	{
 		chomp $line ;
 
-		if ($line =~ /use\s+App::Framework::Lite(.*);/)
+print "LINE: $line\n" if $this->{'debug'};
+
+		if ($line =~ /^__DATA__/)
 		{
-			print $out_fh "App::Framework::Lite->import($1) ;\n" ;
-		}
-		elsif ($line =~ /^__DATA__/)
-		{
-			print $out_fh "\n## EMBEDDED App::Framework::Lite ##\n" ;
-			print $out_fh "$module_str\n" ;
-			print $out_fh "\## EMBEDDED App::Framework::Lite - END ##\n" ;
-			
 			# Handle any other embedded modules
-			foreach my $mod (keys %libs)
+			foreach my $mod (sort {$libs{$a}{'order'} <=> $libs{$b}{'order'} } keys %libs)
 			{
-				$module_str = $this->_module_str($mod, $no_compress) ;
+				my $module_str = $libs{$mod}{'content'} ;
 				
 				print $out_fh "\n## EMBEDDED $mod ##\n" ;
 				print $out_fh "$module_str\n" ;
@@ -3990,29 +4107,52 @@ sub embed
 		else
 		{
 			## Check for libs if required
-			if ($embed_libs)
+			if ($line =~ /^\s*use\s+(\S+)(.*);/)
 			{
-				if ($line =~ /use\s+(\S+)(.*);/)
-				{
-					my ($module, $import, $file) = ($1, $2, undef) ;
-					$module = $this->find_lib($module, \$file) ;
-					
-					# If this is related to the program path then include it
-					my $regexp = qr($this->{'progpath'}) ;
-					if ($file =~ $regexp)
-					{
-						$libs{$module} = $file ;
-						print $out_fh "$module->import($import) ;\n" ;
-						next ;
-					}
-				}
+				my ($module, $import, $file) = ($1, $2, undef) ;
+				$module = $this->find_lib($module, \$file) ;
 				
+				# If this is related to the program path then include it
+				if ($this->_module_to_embed($module, $file, $embed_libs))
+				{
+					print $out_fh "$module->import($import) ;\n" unless $handled_libs{$module} ;
+
+print " + get subs\n" if $this->{'debug'};
+					## get any sub-modules
+					my @new = ($module) ;
+					my $new = 1 ;
+					do
+					{
+						$new = 0 ;
+						foreach my $mod (keys %libs)
+						{
+							if (!$handled_libs{$mod})
+							{
+								push @new, $mod ;
+							}
+						}
+						foreach my $mod (@new)
+						{
+print " + + module str $mod\n" if $this->{'debug'};
+							my $href = $this->_add_mod_lib($mod, \%libs) ;
+							$href->{'content'} = $this->_module_str($mod, $compress, \%libs, $embed_libs) ;
+							++$handled_libs{$mod} ;
+							++$new ;
+						}
+						@new = () ;
+					} while ($new) ;
+print " + get subs done\n" if $this->{'debug'};
+					
+					next ;
+				}
 			}
 			print $out_fh "$line\n" ;
 		}
 	}
 	close $in_fh ;	
 	close $out_fh ;	
+	
+	return %libs ;
 }
 #@NO-EMBED END
 
@@ -4028,9 +4168,11 @@ sub embed
 sub _module_str
 {
 	my $this = shift ;
-	my ($module, $no_compress) = @_ ;
+	my ($module, $compress, $libs_href, $embed_libs) = @_ ;
 	
 	my $module_str = "" ;
+
+print "_module_str($module, compress=$compress, embed_libs=$embed_libs)\n" if $this->{'debug'};
 	
 	## Find module file
 	my $src ;
@@ -4038,18 +4180,26 @@ sub _module_str
 	
 	## Squash module
 	open my $in_fh, "<$src" or die "Error: Unable to read module $src : $!" ;
+	my $use=0 ;
+	my $begin=0 ;
 	my $pod=0 ;
+	my $podnext=0 ;
 	my $no_embed=0 ;
 	my $asis=0 ;
 	my $prev_semi=0;
 	my $comment=0;
+	my $varinit = 1 ;
+	my $varsdef = "" ;
 	my $line ;
 	
-	$asis = '@@ALWAYS-ASIS@@' if $no_compress ;
+	$asis = '@@ALWAYS-ASIS@@' if !$compress ;
 	
 	while(defined($line = <$in_fh>))
 	{
 		chomp $line ;
+
+print " : LINE: $line\n" if $this->{'debug'};
+print " (varinit=$varinit, pod=$pod)\n" if $this->{'debug'};
 
 		if ($line =~ /\@NO\-EMBED (\w+)/)
 		{
@@ -4064,68 +4214,223 @@ sub _module_str
 			next ;
 		}
 		next if $no_embed ;
+
+		## pod
+		$pod = $podnext ;
+		if ($line =~ /^=(\w+)/)
+		{
+			if ($1 eq 'cut')
+			{
+				$podnext = 0 ;
+			}
+			else
+			{
+				$podnext = 1 ;
+			}
+			$pod = 1 ;
+		}
+
 			
+		## using an embdeddable module?
+		$use=0 ;
+		if (!$pod)
+		{
+			if ($line =~ /^\s*use\s+(\S+)(.*);/)
+			{
+				my ($module, $import, $file) = ($1, $2, undef) ;
+				$module = $this->find_lib($module, \$file) ;
+				$use=1 ;
+	
+	print " + use $module ($import)\n" if $this->{'debug'};
+				
+				# If this is embeddable
+				if ($this->_module_to_embed($module, $file, $embed_libs))
+				{
+	print " + + embed $module\n" if $this->{'debug'} ;
+					$module_str .= "$module->import($import) ;\n" ;
+					$this->_add_mod_lib($module, $libs_href) ;
+					next
+				}
+			}
+		}
+
 
 		if ($asis)
 		{
+			## Look for end of as-is block
 			if ($line =~ /^$asis/)
 			{
 				$asis = 0 ;
 				$module_str .= "$line\n" ;
+print " + + line asis END\n" if $this->{'debug'};
 				next ;
 			}
 		}
 		else
 		{
-			if ($line =~ /^=(\w+)/)
-			{
-				if ($1 eq 'cut')
-				{
-					$pod = 0 ;
-				}
-				else
-				{
-					$pod = 1 ;
-				}
-				next ;
-			}
+print " + + pod skip\n" if $pod && $this->{'debug'};
 			next if $pod ;
 
 			$line =~ s/^\s+// ;
 			$line =~ s/\s+$// ;
+			
+print " + + empty line skip\n" if !$line && $this->{'debug'};
 			next unless $line ;
+
+print " + + comment line skip\n" if ($line =~ /^#/) && $this->{'debug'} ; 
 			next if ($line =~ /^#/) ; 
 			
+			# check for code that needs to be kept "as-is"
 			if ($line =~ /<<['"]*(\w+)['"]*/)
 			{
 				$asis = $1 ;
 			}
 		}
-		
-		# skip end of module
-		if ($line =~ /^__END__|1;/)
+
+
+		if (!$pod)
 		{
-			next ;
+		# BEGIN block
+		if ($line =~ /^\s*BEGIN/)
+		{
+			$begin=1 ;
+	print " + BEGIN found\n" if $this->{'debug'};
+		}
+		if ($begin)
+		{
+			# end of variables section
+			$varinit = 0 ;
+
+	print " + BEGIN processing\n" if $this->{'debug'};
+			if ($line =~ /{/)
+			{
+				$begin = 0 ;
+				
+	print " + BEGIN handle vars\n" if $this->{'debug'};
+				## See if we've handled any variables
+				if ($varsdef)
+				{
+	print " + BEGIN inserted vars\n$varsdef\n" if $this->{'debug'};
+					# add variables
+					$line =~ s/([^{]*\{)/$1 . $varsdef/e ;
+					$varsdef = "" ;
+				}
+	print " + BEGIN done\n" if $this->{'debug'};
+			}
 		}
 		
-		# Set embedded flag
-		$line =~ s/\$EMBEDDED = 0/\$EMBEDDED = 1/ ;
+		# skip end of module
+		if ($line =~ /^__END__|^1;/)
+		{
+print " + + line skip END\n" if $this->{'debug'};
 
-		# Set version
-		$line =~ s/\$VERSION = \$VERSION/\$VERSION = "$VERSION"/ ;
+			## See if we've handled any variables
+			if ($varsdef)
+			{
+print " + + ADD BEGIN:\n$varsdef\n" if $this->{'debug'};
+				$module_str .= "\nBEGIN {\n" ;
+				$module_str .= $varsdef ;
+				$module_str .= "}\n" ;
+				$varsdef = "" ;
+			}
+			next ;
+		}
 
-		## print it
-		$module_str .= "$line" ;
+		# end of variables section
+		if ($line =~ /^\s*sub/)
+		{
+			# end of variables section
+			$varinit = 0 ;
+		}
+
+		# comments
 		$comment=0;
 		if ($line =~ /#/) 
 		{
 			$comment=1 ;
 		}
-		$module_str .= "\n" if $asis || $comment ;
+		
+		# gather variables
+		if ($varinit)
+		{
+	print " + Gathering variables\n" if $this->{'debug'};
+			$line =~ s/^\s+// ;
+			$line =~ s/\s+$// ;
+			
+			# don't keep: empty lines, package def, comments, pod, or use defs
+			if ($line && ($line !~ /package/) && ($line !~ /^#/) && !$pod && !$use)
+			{
+				# strip off our/my
+				my $var = $line ;
+				$var =~ s/^\s*(my|our)\s+// ;
+#				$varsdef .= "$var\n" ;
+				$varsdef .= "$var " ;
+				$varsdef .= "\n" if $comment || $asis ;
+
+	print " + + add var: $var\n" if $this->{'debug'};
+			}
+		}
+		
+		## Special case for App::Framework::Lite
+		
+		# Set embedded flag
+		$line =~ s/\$EMBEDDED = 0/\$EMBEDDED = 1/ ;
+
+#		# TODO: Sort this out......!
+#		# Set version
+#		$line =~ s/\$VERSION = \$VERSION/\$VERSION = "$VERSION"/ ;
+		}
+		
+		## print it
+print " + + line ok\n" if $this->{'debug'};
+		$module_str .= "$line" ;
+		if ($asis || $comment)
+		{
+			$module_str .= "\n" ;
+		}
+		else
+		{
+			$module_str .= " " ;
+		}
 	}
 	close $in_fh ;
 
+print "_module_str($module) - END\n" if $this->{'debug'};
+
 	return $module_str ;
+}
+
+
+#---------------------------------------------------------------------
+# Add a module to the HASH
+#
+# HASH is indexed by module name, each entry is a HASH:
+#
+# 'order'	=> number # order in which modules have been added
+# 'content' => scalar # text of the module
+#
+sub _add_mod_lib
+{
+	my $this = shift ;
+	my ($module, $libs_href) = @_ ;
+
+	my $href ;
+	if (exists($libs_href->{$module}))
+	{
+		# already in the list
+		$href = $libs_href->{$module} ;
+	}
+	else
+	{
+		my $order = scalar(%$libs_href) + 1 ;
+		$href = {
+			'order'		=> $order,
+			'content'	=> "",
+		} ;
+		$libs_href->{$module} = $href ;
+	}
+
+	return $href ;
 }
 
 #@NO-EMBED END

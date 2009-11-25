@@ -1,5 +1,10 @@
 Revision history for App-Framework-Lite
 
+1.02    Wed Nov 25 12:47:00 2009
+		Added missing files to MANIFEST
+		Added capability for module to embed hierarchy of modules
+		Added App::Framework::Lite::Object to optionally provide simple object support for user modules
+	
 1.01    Mon Nov 23 09:19:00 2009
 		Various fixes to correct CPAN test failures on other platforms
 	

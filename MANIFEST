@@ -29,6 +29,7 @@ t/02-Options-2.t
 t/02-Options-3.t
 t/02-Options-4.t
 t/03-Inc.t
+t/03-Use.t
 t/04-Args.t
 t/04-ArgsArray.t
 t/04-ArgsArray2.t
@@ -39,6 +40,9 @@ t/05-Data.t
 t/06-pod-coverage.t
 t/07-pod.t
 t/08-embed.t
+t/10-Feature-Run.t
+t/20-Feature-Logging.t
+t/20-Feature-Run-Logging.t
 t/args/array.txt
 t/args/dir/dummy
 t/args/exists.txt
@@ -51,4 +55,5 @@ t/embed/test3.pl
 t/lib/MyAppLib.pm
 t/lib/ObjTest.pm
 t/lib/Test/NoMore.pm
+t/test/runtest.pl
 t/MyApp.pm

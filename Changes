@@ -1,5 +1,9 @@
 Revision history for App-Framework-Lite
 
+1.03    Mon Dec 07 12:47:00 2009
+		Various tweaks, fixes, and test updates
+		(Added run & logging as undocumented features - need to update documentation!)
+		
 1.02    Wed Nov 25 12:47:00 2009
 		Added missing files to MANIFEST
 		Added capability for module to embed hierarchy of modules

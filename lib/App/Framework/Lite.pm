@@ -930,7 +930,7 @@ use 5.008004;
 use strict ;
 
 
-our $VERSION = "1.02" ;
+our $VERSION = "1.03" ;
 
 
 #============================================================================================
@@ -938,12 +938,14 @@ our $VERSION = "1.02" ;
 #============================================================================================
 use Carp ;
 use Cwd ;
+use Getopt::Long qw(:config no_ignore_case) ;
+use Pod::Usage ;
 use File::Basename ;
 use File::Path ;
 use File::Temp ;
-use Getopt::Long qw(:config no_ignore_case) ;
-use Pod::Usage ;
+use File::Spec ;
 use File::DosGlob 'glob' ;
+use File::Which ;
 
 
 #============================================================================================
@@ -962,6 +964,9 @@ my $EMBEDDED = 0 ;
 
 # Keep track of import info
 my $import_args ;
+
+# Run error action
+our $ON_ERROR_DEFAULT = 'fatal' ;
 
 ## Set up variables
 my	%FIELDS = (
@@ -1009,6 +1014,41 @@ my	%FIELDS = (
 		
 		## Exit
 		'exit_type'			=> 'exit',
+
+		## Run fields
+		'cmd'		=> undef,
+		'args'		=> undef,
+		'timeout'	=> undef,
+		'nice'		=> undef,
+		'dryrun'	=> 0,
+		
+		'on_error'	=> $ON_ERROR_DEFAULT,
+		'error_str'	=> "",
+		'required'	=> {},
+		
+		'check_results'	=> undef,
+		'progress'		=> undef,
+		
+		'status'	=> 0,
+		'results'	=> [],
+		
+		'norun'		=> 0,
+
+
+		'log'		=> {
+			'all'		=> 0,
+			'cmd'		=> 0,
+			'results'	=> 0,
+			'status'	=> 0,
+		},
+
+		## Logging
+		'logfile'		=> undef,
+		'mode'			=> 'truncate',
+		'to_stdout'		=> 0,
+		
+		'_started'		=> 0,
+		
 	) ;
 
 my $POD_HEAD =	"=head" ;
@@ -1021,6 +1061,7 @@ my @DEFAULT_OPTS = (
 	['h|"help"',		'Print help', 		'Show brief help message then exit'],
 	['man',				'Full documentation', 'Show full man page then exit' ],
 	['man-dev',			'Full developer\'s documentation', 'Show full man page for the application developer then exit' ],
+	['log=s',			'Log file', 		'Specify a log file', ],
 	['dev:pod',			'Output full pod', 	'Show full man page as pod then exit' ],
 	['dev:dbg-data',		'Debug option: Show __DATA__', 				'Show __DATA__ definition in script then exit' ],
 	['dev:dbg-data-array',	'Debug option: Show all __DATA__ items', 	'Show all processed __DATA__ items then exit' ],
@@ -1033,7 +1074,18 @@ my @DEFAULT_OPTS = (
 #@NO-EMBED END
 	) ;
 
-
+our @USED = (
+	'Carp',
+	'Cwd',
+	'Getopt::Long qw(:config no_ignore_case)',
+	'Pod::Usage',
+	'File::Basename',
+	'File::Path',
+	'File::Temp',
+	'File::Spec',
+	'File::DosGlob qw(glob)',
+	'File::Which',
+) ;
 
 
 #============================================================================================
@@ -1062,6 +1114,7 @@ BEGIN {
 			};
 		}	
 	}
+	
 }
 
 #============================================================================================
@@ -1079,6 +1132,15 @@ sub import
 	## Set program info
 	App::Framework::Lite->_set_paths($filename) ;
 	
+
+	## Import modules into caller space
+	my $include = "package $package;\n" ;
+	foreach my $use (@USED)
+	{
+		$include .= "use $use ;\n" ;
+	}
+	eval $include ;
+	die "Error: Unable to load modules into $package : $@" if $@ ;
 }
 
 
@@ -1542,6 +1604,11 @@ sub app_handle_opts
 	}
 #@NO-EMBED END
 
+	if ($opts{'log'})
+	{
+		$this->{logfile} = $opts{'log'} ;
+	}
+
 }
 
 
@@ -1625,7 +1692,16 @@ sub exit
 	}
 	else
 	{
-		die "End of application. Exit code = $exit_code" ;
+		# check for eval (for testing)
+		if ($^S) 
+		{
+			die "End of application. Exit code = $exit_code" ;
+   		} 
+   		else 
+   		{
+      		carp(@_);
+			exit $exit_code ;
+   		}
 	}	
 }
 
@@ -3728,11 +3804,658 @@ sub get_synopsis
 }
 
 
+#============================================================================================
+# RUN
+#============================================================================================
+
+#-----------------------------------------------------------------------------
+
+=item B<required([$required_href])>
+
+Get/set the required programs list. If specified, B<$required_href> is a HASH ref where the 
+keys are the names of the required programs (the values are unimportant).
+
+This method returns the B<$required_href> HASH ref having set the values associated with the
+program name keys to the path for that program. Where a program is not found then
+it's path is set to undef.
+
+Also, if the L</on_error> field is set to 'warning' or 'fatal' then this method throws a warning
+or fatal error if one or more required programs are not found. Sets the message string to indicate 
+which programs were not found. 
+
+=cut
+
+sub required
+{
+	my $this = shift ;
+	my ($new_required_href) = @_ ;
+	
+	my $required_href = $this->{'required'} ;
+	if ($new_required_href)
+	{
+		## Test for available executables
+		foreach my $exe (keys %$new_required_href)
+		{
+			$required_href->{$exe} = which($exe) ;
+		}
+		
+		## check for errors
+		my $throw = $this->_throw_on_error($this->{on_error}) ;
+		if ($throw)
+		{
+			my $error = "" ;
+			foreach my $exe (keys %$new_required_href)
+			{
+				if (!$required_href->{$exe})
+				{
+					$error .= "  $exe\n" ;
+				}
+			}
+			
+			if ($error)
+			{
+				$this->$throw("The following programs are required but not available:\n$error\n") ;
+			}
+		}
+	}
+	
+	return $required_href ;
+}
+
+#--------------------------------------------------------------------------------------------
+
+=item B<run( [args] )>
+
+Execute a command if B<args> are specified. Whether B<args> are specified or not, always returns the run object. 
+
+This method has reasonably flexible arguments which can be one of:
+
+=item (%args)
+
+The args HASH contains the information needed to set the L</FIELDS> and then run teh command for example:
+
+  ('cmd' => 'ping', 'args' => $host) 
+
+=item ($cmd)
+
+You can specify just the command string. This will be treated as if you had called the function with:
+
+  ('cmd' => $cmd) 
+
+=item ($cmd, $args)
+
+You can specify the command string and the arguments string. This will be treated as if you had called the function with:
+
+  ('cmd' => $cmd, 'args' => $args) 
+
+NOTE: Need to get B<run> object from application to access this method. This can be done as one of:
+
+  $app->run()->run(.....);
+  
+  or
+  
+  my $run = $app->run() ;
+  $run->run(....) ;
+
+=cut
+
+sub run
+{
+	my $this = shift ;
+	my (@args) = @_ ;
+
+#	# See if this is a class call
+#	$this = $this->check_instance() ;
+
+$this->_dbg_prt(["run() this=", $this], 2) ;
+$this->_dbg_prt(["run() args=", \@args]) ;
+
+	my %args ;
+	if (@args == 1)
+	{
+		$args{'cmd'} = $args[0] ;
+	}
+	elsif (@args == 2)
+	{
+		if ($args[0] ne 'cmd')
+		{
+			# not 'cmd' => '....' so treat as ($cmd, $args)
+			$args{'cmd'} = $args[0] ;
+			$args{'args'} = $args[1] ;
+		}
+		else
+		{
+			%args = (@args) ;
+		}
+	}
+	else
+	{
+		%args = (@args) ;
+	}
+	
+	## return immediately if no args
+	return $this unless %args ;
+
+	## create local copy of variables
+	my %local = $this->vars() ;
+	
+	# Set any specified args
+	foreach my $key (keys %local)
+	{
+		$local{$key} = $args{$key} if exists($args{$key}) ;
+	}
+	
+	## set any 'special' vars
+	my %set ;
+	foreach my $key (qw/debug/)
+	{
+		$set{$key} = $args{$key} if exists($args{$key}) ;
+	}
+	$this->set(%set) if keys %set ;
+	
+
+	# Get command
+	my $cmd = $local{'cmd'} ;
+	$this->throw_fatal("command not specified") unless $cmd ;
+	
+	# Add niceness
+	my $nice = $local{'nice'} ;
+	if (defined($nice))
+	{
+		$cmd = "nice -n $nice $cmd" ;
+	}
+	
+	
+	# clear vars
+	$this->set(
+		'status'	=> 0,
+		'results'	=> [],
+		'error_str'	=> "",
+	) ;
+	
+
+	# Check arguments
+	my $args = $this->_check_run_args($local{'args'}) ;
+
+	# Run command and save results
+	my @results ;
+	my $rc ;
+
+	## Logging
+	$this->_logging('cmd', "RUN: $cmd $args\n") ;
+
+	my $timeout = $local{'timeout'} ;
+	if ($local{'dryrun'})
+	{
+		## Print
+		my $timeout_str = $timeout ? "[timeout after $timeout secs]" : "" ;
+		print "RUN: $cmd $args $timeout_str\n" ;
+	}
+	else
+	{
+		## Run
+		
+		if (defined($timeout))
+		{
+			# Run command with timeout
+			($rc, @results) = $this->_run_timeout($cmd, $args, $timeout, $local{'progress'}, $local{'check_results'}) ;		
+		}
+		else
+		{
+			# run command
+			($rc, @results) = $this->_run_cmd($cmd, $args, $local{'progress'}, $local{'check_results'}) ;		
+		}
+	}
+
+	# Update vars
+	$this->{'status'} = $rc ;
+	chomp foreach (@results) ;
+	$this->{'results'} = \@results ;
+
+	$this->_logging('results', \@results) ;
+	$this->_logging('status', "Status: $rc\n") ;
+	
+	## Handle non-zero exit status
+	my $throw = $this->_throw_on_error($local{'on_error'}) ;
+	if ($throw && $rc)
+	{
+		my $results = join("\n", @results) ;
+		my $error_str = $local{'error_str'} ;
+		$this->$throw("Command \"$cmd $args\" exited with non-zero error status $rc : \"$error_str\"\n$results\n") ;
+	}
+	
+	return($this) ;
+}
+
+#----------------------------------------------------------------------------
+
+=item B< Run([%args]) >
+
+Alias to L</run>
+
+=cut
+
+*Run = \&run ;
+
+#--------------------------------------------------------------------------------------------
+
+=item B<results()>
+
+Run: Retrieve the results output from the last run. Results are returned as an ARRAY ref to the lines of
+output
+
+=cut
+
+sub results
+{
+	my $this = shift ;
+
+	return $this->{'results'} ;
+}
+
+#--------------------------------------------------------------------------------------------
+
+=item B<status()>
+
+Run: Retrieve the exit status of the last run.
+
+=cut
+
+sub status
+{
+	my $this = shift ;
+
+	return $this->{'status'} ;
+}
+
+#--------------------------------------------------------------------------------------------
+
+=item B<on_error( [$on_error] )>
+
+Run: Set/get the on_error field.
+
+=cut
+
+sub on_error
+{
+	my $this = shift ;
+	my ($on_error) = @_ ;
+	
+	$this->{'on_error'} = $on_error if (defined($on_error)) ;
+	$on_error = $this->{'on_error'} ;
+	
+	return $on_error ;
+}
+
+#--------------------------------------------------------------------------------------------
+
+=item B<progress( $progress_callback )>
+
+Run: Set the progress callback.
+
+=cut
+
+sub progress
+{
+	my $this = shift ;
+	my ($progress) = @_ ;
+	
+	$this->{'progress'} = $progress if (defined($progress)) ;
+	$progress = $this->{'progress'} ;
+	
+	return $progress ;
+}
+
+#----------------------------------------------------------------------------
+# logging with checks
+sub _logging
+{
+	my $this = shift ;
+	my ($type, @args) = @_ ;
+
+	my $logopts_href = $this->{'log'} ;
+
+	# pass to logger if necessary
+	if ($logopts_href->{all} || $logopts_href->{$type})
+	{
+		$this->logging(@args) ;
+	}
+}
+		
+		
+
+
+
+#--------------------------------------------------------------------------------------------
+#
+# Ensure arguments are correct
+#
+sub _check_run_args
+{
+	my $this = shift ;
+	my ($args) = @_ ;
+	
+	# If there is no redirection, just add redirect 2>1
+	if (!$args || ($args !~ /\>/) )
+	{
+		$args .= " 2>&1" ;
+	}
+	
+	return $args ;
+}
+
+
+#----------------------------------------------------------------------
+# Run command with no timeout
+#
+sub _run_cmd
+{
+	my $this = shift ;
+	my ($cmd, $args, $progress, $check_results) = @_ ;
+
+$this->_dbg_prt(["_run_cmd($cmd) args=$args\n"]) ;
+	
+	my @results ;
+	@results = `$cmd $args` ;
+	my $rc = $? ;
+
+	foreach (@results)
+	{
+		chomp $_ ;
+	}
+
+	# if it's defined, call the progress checker for each line
+	if (defined($progress))
+	{
+		my $linenum = 0 ;
+		my $state_href = {} ;
+		foreach (@results)
+		{
+			&$progress($_, ++$linenum, $state_href) ;
+		}
+	}
+
+	
+	# if it's defined, call the results checker for each line
+	$rc ||= $this->_check_results(\@results, $check_results) ;
+
+	return ($rc, @results) ;
+}
+
+#----------------------------------------------------------------------
+#Execute a command in the background, gather output, return status.
+#If timeout is specified (in seconds), process is killed after the timeout period.
+#
+sub _run_timeout
+{
+	my $this = shift ;
+	my ($cmd, $args, $timeout, $progress, $check_results) = @_ ;
+
+$this->_dbg_prt(["_run_timeout($cmd) timeout=$timeout args=$args\n"]) ;
+
+	## Timesout must be set
+	$timeout ||= 60 ;
+
+	# Run command and save results
+	my @results ;
+
+	# Run command but time it and kill it when timed out
+	local $SIG{ALRM} = sub { 
+		# normal execution
+		die "timeout\n" ;
+	};
+
+	# if it's defined, call the progress checker for each line
+	my $state_href = {} ;
+	my $linenum = 0 ;
+
+	# Run inside eval to catch timeout		
+	my $pid ;
+	my $rc = 0 ;
+	my $endtime = (time + $timeout) ;
+	eval 
+	{
+		alarm($timeout);
+		$pid = open my $proc, "$cmd $args |" or $this->throw_fatal("Unable to fork $cmd : $!") ;
+
+		while(<$proc>)
+		{
+			chomp $_ ;
+			push @results, $_ ;
+
+			++$linenum ;
+
+			# if it's defined, call the progress checker for each line
+			if (defined($progress))
+			{
+				&$progress($_, $linenum, $state_href) ;
+			}
+
+			# if it's defined, check timeout
+			if (time > $endtime)
+			{
+				$endtime=0;
+				last ;
+			}
+		}
+		alarm(0) ;
+		$rc = $? ;
+print "end of program : rc=$rc\n" if $this->{'debug'} ;  
+	};
+	if ($@)
+	{
+		$rc ||= 1 ;
+		if ($@ eq "timeout\n")
+		{
+print "timed out - stopping command pid=$pid...\n" if $this->{'debug'} ;
+			# timed out  - stop command
+			kill('INT', $pid) ;
+		}
+		else
+		{
+print "unexpected end of program : $@\n" if $this->{'debug'} ; 			
+			# Failed
+			alarm(0) ;
+			$this->throw_fatal( "Unexpected error while timing out command \"$cmd $args\": $@" ) ;
+		}
+	}
+	alarm(0) ;
+
+print "exit program\n" if $this->{'debug'} ; 
+
+	# if it's defined, call the results checker for each line
+	$rc ||= $this->_check_results(\@results, $check_results) ;
+
+	return($rc, @results) ;
+}
+
+#----------------------------------------------------------------------
+# Check the results calling the check_results() hook if defined
+#
+sub _check_results
+{
+	my $this = shift ;
+	my ($results_aref, $check_results) = @_ ;
+
+	my $rc = 0 ;
+	
+	# If it's defined, run the check results hook
+	if (defined($check_results))
+	{
+		$rc = &$check_results($results_aref) ;
+	}
+
+	return $rc ;
+}
+
+
+#----------------------------------------------------------------------
+# If the 'on_error' setting is not 'status' then return the "throw" type
+#
+sub _throw_on_error
+{
+	my $this = shift ;
+	my ($on_error) = @_ ;
+	$on_error ||= $ON_ERROR_DEFAULT ;
+	
+	my $throw = "";
+	if ($on_error ne 'status')
+	{
+		$throw = 'throw_fatal' ;
+		if ($on_error =~ m/warn/i)
+		{
+			$throw = 'throw_warning' ;
+		}
+	}
+
+	return $throw ;
+}
+
+
+
+
+
+
+#============================================================================================
+# LOGGING
+#============================================================================================
+
+#----------------------------------------------------------------------------
+
+=item B<logging($arg1, [$arg2, ....])>
+
+Log the argument(s) to the log file iff a log file has been specified.
+
+The list of arguments may be: SCALAR, ARRAY reference, HASH reference, SCALAR reference. SCALAR and SCALAR ref are printed
+as-is without any extra newlines. ARRAY ref is printed out one entry per line with a newline added. The HASH ref is printed out
+in the format produced by L<App::Framework::Base::Object::DumpObj>.
+
+
+=cut
+
+sub logging
+{
+	my $this = shift ;
+	my (@args) = @_ ;
+
+	my $tolog = "" ;
+	foreach my $arg (@args)
+	{
+		if (ref($arg) eq 'ARRAY')
+		{
+			foreach (@$arg)
+			{
+				$tolog .= "$_\n" ;
+			}
+		}
+		elsif (ref($arg) eq 'HASH')
+		{
+#			$tolog .= prtstr_data($arg) . "\n" ;
+		}
+		elsif (ref($arg) eq 'SCALAR')
+		{
+			$tolog .= $$arg ;
+		}
+		elsif (!ref($arg))
+		{
+			$tolog .= $arg ;
+		}
+		else
+		{
+#			$tolog .= prtstr_data($arg) . "\n" ;
+		}
+	}
+		
+	## Log
+	my $logfile = $this->{logfile} ;
+	if ($logfile)
+	{
+		## start if we haven't yet
+		if (!$this->{_started})
+		{
+			$this->_start_logging() ;
+		}
+
+		open my $fh, ">>$logfile" or $this->throw_fatal("Error: unable to append to logfile \"$logfile\" : $!") ;
+		print $fh $tolog ;
+		close $fh ;
+	}
+
+	## Echo
+	if ($this->{to_stdout})
+	{
+		print $tolog ;
+	}
+
+	return($this) ;
+}
+
+
+#----------------------------------------------------------------------------
+
+=item B<echo_logging($arg1, [$arg2, ....])>
+
+Same as L</logging> but echoes output to STDOUT.
+
+=cut
+
+sub echo_logging
+{
+	my $this = shift ;
+	my (@args) = @_ ;
+	
+	# Temporarily force echoing to STDOUT on, then do logging
+	my $to_stdout = $this->{to_stdout} ;
+	$this->{to_stdout} = 1 ;
+	$this->logging(@args) ;
+	$this->{to_stdout} = $to_stdout ;
+
+	return($this) ;
+}	
+	
+#----------------------------------------------------------------------------
+
+=item B< Logging([%args]) >
+
+Alias to L</logging>
+
+=cut
+
+*Logging = \&logging ;
+
+
+#----------------------------------------------------------------------------
+#
+#=item B<_start_logging()>
+#
+#Create/append log file
+#
+#=cut
+#
+sub _start_logging
+{
+	my $this = shift ;
+
+	my $logfile = $this->{logfile} ;
+	if ($logfile)
+	{
+		my $mode = ">" ;
+		if ($this->{mode} eq 'append')
+		{
+			$mode = ">>" ;
+		}
+		
+		open my $fh, "$mode$logfile" or $this->throw_fatal("Unable to write to logfile \"$logfile\" : $!") ;
+		close $fh ;
+		
+		## set flag
+		$this->{_started} = 1 ;
+	}
+}	
 
 #============================================================================================
 # UTILITY
 #============================================================================================
-
 
 
 #----------------------------------------------------------------------------
@@ -3957,10 +4680,64 @@ Output error message then exit
 sub throw_fatal
 {
 	my $this = shift ;
-	my ($message) = @_ ;
+	my ($message, $errorcode) = @_ ;
 
 	print "Fatal Error: $message\n" ;
-	$this->exit( 1 ) ;
+	$this->exit( $errorcode || 1 ) ;
+}
+
+#-----------------------------------------------------------------------------
+
+=item B<throw_nonfatal($message, [$errorcode])>
+
+Add a new error (type=nonfatal) to this object instance, also adds the error to this Class list
+keeping track of all runtime errors
+
+=cut
+
+sub throw_nonfatal
+{
+	my $this = shift ;
+	my ($message, $errorcode) = @_ ;
+	
+	print "Non-Fatal Error: $message\n" ;
+	return ($errorcode || 0) ;
+}
+
+#-----------------------------------------------------------------------------
+
+=item B<throw_warning($message, [$errorcode])>
+
+Add a new error (type=warning) to this object instance, also adds the error to this Class list
+keeping track of all runtime errors
+
+=cut
+
+sub throw_warning
+{
+	my $this = shift ;
+	my ($message, $errorcode) = @_ ;
+	
+	print "Warning: $message\n" ;
+	return ($errorcode || 0) ;
+}
+
+#-----------------------------------------------------------------------------
+
+=item B<throw_note($message, [$errorcode])>
+
+Add a new error (type=note) to this object instance, also adds the error to this Class list
+keeping track of all runtime errors
+
+=cut
+
+sub throw_note
+{
+	my $this = shift ;
+	my ($message, $errorcode) = @_ ;
+	
+	print "Info: $message\n" ;
+	return ($errorcode || 0) ;
 }
 
 #----------------------------------------------------------------------------
@@ -4023,6 +4800,7 @@ sub find_lib
 
 #@NO-EMBED BEGIN
 
+#----------------------------------------------------------------------------
 sub _module_to_embed
 {
 	my $this = shift @_ ;
@@ -4087,6 +4865,13 @@ print "LINE: $line\n" if $this->{'debug'};
 
 		if ($line =~ /^__DATA__/)
 		{
+			print $out_fh <<EMBED_START;
+##################################################################################
+# Start of embedded modules - embedded by App::Framework::Lite
+##################################################################################
+#
+EMBED_START
+			
 			# Handle any other embedded modules
 			foreach my $mod (sort {$libs{$a}{'order'} <=> $libs{$b}{'order'} } keys %libs)
 			{
@@ -4097,11 +4882,19 @@ print "LINE: $line\n" if $this->{'debug'};
 				print $out_fh "\## EMBEDDED $mod - END ##\n" ;
 			}
 			
-			print $out_fh "package main; \n" ;
+			print $out_fh <<EMBED_END;
+#
+##################################################################################
+# End of embedded modules - embedded by App::Framework::Lite
+##################################################################################
+package main;
 
-			print $out_fh "#========================================================\n" ;
-			print $out_fh "# SETUP\n" ;
-			print $out_fh "#========================================================\n" ;
+#========================================================
+# SETUP
+#========================================================
+
+EMBED_END
+
 			print $out_fh "\n$line\n" ;
 		}
 		else
@@ -4803,6 +5596,13 @@ Steve Price, C<< <sdprice at cpan.org> >>
 Please report any bugs or feature requests to C<bug-app-framework-lite at rt.cpan.org>, or through
 the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=App-Framework-Lite>.  I will be notified, and then you'll
 automatically be notified of progress on your bug as I make changes.
+
+=head1 TODO
+
+This version actually contains support for the 'run' and 'logging' features (from L<App::Framework>) as experimental add-ons. Feel free
+to use them, but don't expect any support yet!
+
+The next release will have better documentation, feature support, testing etc. 
 
 
 =head1 SUPPORT

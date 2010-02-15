@@ -930,7 +930,7 @@ use 5.008004;
 use strict ;
 
 
-our $VERSION = "1.03" ;
+our $VERSION = "1.04" ;
 
 
 #============================================================================================
@@ -5151,7 +5151,7 @@ print " + + ADD BEGIN:\n$varsdef\n" if $this->{'debug'};
 			$line =~ s/\s+$// ;
 			
 			# don't keep: empty lines, package def, comments, pod, or use defs
-			if ($line && ($line !~ /package/) && ($line !~ /^#/) && !$pod && !$use)
+			if ($line && ($line !~ /^package/) && ($line !~ /^#/) && !$pod && !$use)
 			{
 				# strip off our/my
 				my $var = $line ;

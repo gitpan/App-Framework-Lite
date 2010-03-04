@@ -34,7 +34,7 @@ diag( "Testing auto-use of common modules" );
 	'File::Temp'									=> 'my $tmp = tmpnam()',
 	'File::Spec'									=> 'my $x=File::Spec->catfile("a", "b", "c");',
 #	'File::DosGlob qw(glob)'						=> '',
-	'File::Which'									=> 'which("perl")',
+#	'File::Which'									=> 'which("perl")',
 	) ;
 
 	plan tests => scalar(keys %tests) ;

@@ -930,7 +930,7 @@ use 5.008004;
 use strict ;
 
 
-our $VERSION = "1.04" ;
+our $VERSION = "1.05" ;
 
 
 #============================================================================================
@@ -945,7 +945,7 @@ use File::Path ;
 use File::Temp ;
 use File::Spec ;
 use File::DosGlob 'glob' ;
-use File::Which ;
+#use File::Which ;
 
 
 #============================================================================================
@@ -1084,8 +1084,12 @@ our @USED = (
 	'File::Temp',
 	'File::Spec',
 	'File::DosGlob qw(glob)',
+) ;
+
+our @OPT_MOD = (
 	'File::Which',
 ) ;
+our %AVAILABLE_MOD ;
 
 
 #============================================================================================
@@ -1115,6 +1119,17 @@ BEGIN {
 		}	
 	}
 	
+	## Optional modules
+	foreach my $mod (@OPT_MOD)
+	{
+		# see if we can load up the package
+		if (eval "require $mod") 
+		{
+			$mod->import() ;
+			++$AVAILABLE_MOD{$mod} ;
+
+		}
+	}
 }
 
 #============================================================================================
@@ -1138,6 +1153,13 @@ sub import
 	foreach my $use (@USED)
 	{
 		$include .= "use $use ;\n" ;
+	}
+	foreach my $use (keys %AVAILABLE_MOD)
+	{
+		if ($AVAILABLE_MOD{$use})
+		{
+			$include .= "use $use ;\n" ;
+		}
 	}
 	eval $include ;
 	die "Error: Unable to load modules into $package : $@" if $@ ;
@@ -3836,7 +3858,15 @@ sub required
 		## Test for available executables
 		foreach my $exe (keys %$new_required_href)
 		{
-			$required_href->{$exe} = which($exe) ;
+			# only do this is we have File::Which
+			if ($AVAILABLE_MOD{'File::Which'})
+			{
+				$required_href->{$exe} = which($exe) ;
+			}
+			else
+			{
+				$required_href->{$exe} = 1 ;
+			}
 		}
 		
 		## check for errors
@@ -4849,6 +4879,7 @@ sub embed
 
 	my %libs ;
 	my %handled_libs ;
+	my @main ;
 
 print "embed($src, $dest, compress=$compress, embed_libs=$embed_libs)\n" if $this->{'debug'};
 
@@ -4868,6 +4899,9 @@ print "LINE: $line\n" if $this->{'debug'};
 			print $out_fh <<EMBED_START;
 ##################################################################################
 # Start of embedded modules - embedded by App::Framework::Lite
+#
+# Your original script is now at the end of the file.
+#
 ##################################################################################
 #
 EMBED_START
@@ -4889,13 +4923,10 @@ EMBED_START
 ##################################################################################
 package main;
 
-#========================================================
-# SETUP
-#========================================================
-
 EMBED_END
 
-			print $out_fh "\n$line\n" ;
+#			print $out_fh "\n$line\n" ;
+			push @main, "\n$line\n" ;
 		}
 		else
 		{
@@ -4908,7 +4939,9 @@ EMBED_END
 				# If this is related to the program path then include it
 				if ($this->_module_to_embed($module, $file, $embed_libs))
 				{
-					print $out_fh "$module->import($import) ;\n" unless $handled_libs{$module} ;
+##why would you NOT import????##					print $out_fh "$module->import($import) ;\n" unless $handled_libs{$module} ;
+#					print $out_fh "$module->import($import) ;\n" ;
+					push @main, "$module->import($import) ;\n" ;
 
 print " + get subs\n" if $this->{'debug'};
 					## get any sub-modules
@@ -4939,10 +4972,17 @@ print " + get subs done\n" if $this->{'debug'};
 					next ;
 				}
 			}
-			print $out_fh "$line\n" ;
+#			print $out_fh "$line\n" ;
+			push @main, "$line\n" ;
 		}
 	}
-	close $in_fh ;	
+	close $in_fh ;
+	
+	# output script body
+	foreach my $line (@main)
+	{
+		print $out_fh "$line" ;
+	}	
 	close $out_fh ;	
 	
 	return %libs ;
@@ -5240,7 +5280,7 @@ sub _setup_modules
 	if (_load_module('Debug::DumpObj'))
 	{
 		# Create local function
-		*prt_data = sub {Debug::DumpObj::prt_data(@_)} ;
+		*prt_data = sub {my $this = shift; Debug::DumpObj::prt_data(@_)} ;
 	}
 	else
 	{
@@ -5248,12 +5288,12 @@ sub _setup_modules
 		if (_load_module('Data::Dumper'))
 		{
 			# Create local function
-			*prt_data = sub {print Dumper([@_])} ;
+			*prt_data = sub {my $this = shift; print Dumper([@_])} ;
 		}	
 		else
 		{
 			# Create local function
-			*prt_data = sub {print @_, "\n"} ;
+			*prt_data = sub {my $this = shift; print @_, "\n"} ;
 		}
 	}
 
@@ -5438,7 +5478,7 @@ sub _dbg_prt
 #		$pkg =~ s/App::Framework::Lite/ApFw/ ;
 #		
 #		my $prefix = App::Framework::Base::Object::DumpObj::prefix("$pkg ::  ") ;
-		prt_data(@$items_aref) ;
+		$obj->prt_data(@$items_aref) ;
 #		App::Framework::Base::Object::DumpObj::prefix($prefix) ;
 	}
 }

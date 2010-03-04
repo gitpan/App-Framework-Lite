@@ -163,31 +163,46 @@ sub app
 
 	is($run->on_error, 'fatal', 'Default on_error setting') ;
 
-
-	$run->on_error('fatal') ;
-	eval{$run->required({ %progs }) ;} ;
-	ok ($@, "Expected failure to find non-existent program") ;
-
+	if ($App::Framework::Lite::AVAILABLE_MOD{'File::Which'})
+	{
+		$run->on_error('fatal') ;
+		eval{$run->required({ %progs }) ;} ;
+		ok ($@, "Expected failure to find non-existent program") ;
+	}
+	else
+	{
+		# skip this test
+		pass() ;
+	}
+	
 	$run->on_error('status') ;
 	my $required = $run->required({ %progs }) ;
 $app->prt_data("Required stats=", $required) ;	
 	foreach my $exe (keys %progs)
 	{
-		if ($exe eq 'not-there')
+		if ($App::Framework::Lite::AVAILABLE_MOD{'File::Which'})
 		{
-			is($required->{$exe}, undef, "$exe status") ;
-		}
-		else
-		{
-			## if we can find it then the framework should find it
-			if (which($exe))
+			if ($exe eq 'not-there')
 			{
-				ok ($required->{$exe}, "Expected to find $exe") ;
+				is($required->{$exe}, undef, "$exe status") ;
 			}
 			else
 			{
-				is($required->{$exe}, undef, "Expected not to find $exe") ;
+				## if we can find it then the framework should find it
+				if (which($exe))
+				{
+					ok ($required->{$exe}, "Expected to find $exe") ;
+				}
+				else
+				{
+					is($required->{$exe}, undef, "Expected not to find $exe") ;
+				}
 			}
+		}
+		else
+		{
+			# skip this test
+			pass() ;
 		}
 	}	
 

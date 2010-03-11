@@ -930,7 +930,7 @@ use 5.008004;
 use strict ;
 
 
-our $VERSION = "1.05" ;
+our $VERSION = "1.06" ;
 
 
 #============================================================================================
@@ -4887,6 +4887,8 @@ print "embed($src, $dest, compress=$compress, embed_libs=$embed_libs)\n" if $thi
 	open my $in_fh, "<$src" or die "Error: Unable to read $src : $!" ;
 	open my $out_fh, ">$dest" or die "Error: Unable to write $dest : $!" ;
 
+	my $perl_line = "";
+	my $strict = "";
 	my $line ;
 	while(defined($line = <$in_fh>))
 	{
@@ -4897,6 +4899,7 @@ print "LINE: $line\n" if $this->{'debug'};
 		if ($line =~ /^__DATA__/)
 		{
 			print $out_fh <<EMBED_START;
+$perl_line
 ##################################################################################
 # Start of embedded modules - embedded by App::Framework::Lite
 #
@@ -4904,6 +4907,7 @@ print "LINE: $line\n" if $this->{'debug'};
 #
 ##################################################################################
 #
+$strict
 EMBED_START
 			
 			# Handle any other embedded modules
@@ -4930,11 +4934,25 @@ EMBED_END
 		}
 		else
 		{
+			if (!$perl_line)
+			{
+				# find first line (if specifed)
+				if ($line =~ /^#!/)
+				{
+					$perl_line = $line ;
+				}	
+			}
+			
 			## Check for libs if required
 			if ($line =~ /^\s*use\s+(\S+)(.*);/)
 			{
 				my ($module, $import, $file) = ($1, $2, undef) ;
+				if ($module eq 'strict')
+				{
+					$strict = $line ;
+				}
 				$module = $this->find_lib($module, \$file) ;
+				
 				
 				# If this is related to the program path then include it
 				if ($this->_module_to_embed($module, $file, $embed_libs))

@@ -930,7 +930,7 @@ use 5.008004;
 use strict ;
 
 
-our $VERSION = "1.06" ;
+our $VERSION = "1.07" ;
 
 
 #============================================================================================
@@ -961,6 +961,9 @@ my $class_debug ;
 
 # default to state that the module is embedded (overwritten inside BEGIN block)
 my $EMBEDDED = 0 ;
+
+# Maximum line length when embedding (e.g. ensures Clearcase doesn't think file is binary!)
+my $MAX_LINE_LEN = 5000 ;
 
 # Keep track of import info
 my $import_args ;
@@ -4957,8 +4960,6 @@ EMBED_END
 				# If this is related to the program path then include it
 				if ($this->_module_to_embed($module, $file, $embed_libs))
 				{
-##why would you NOT import????##					print $out_fh "$module->import($import) ;\n" unless $handled_libs{$module} ;
-#					print $out_fh "$module->import($import) ;\n" ;
 					push @main, "$module->import($import) ;\n" ;
 
 print " + get subs\n" if $this->{'debug'};
@@ -5033,6 +5034,7 @@ print "_module_str($module, compress=$compress, embed_libs=$embed_libs)\n" if $t
 	open my $in_fh, "<$src" or die "Error: Unable to read module $src : $!" ;
 	my $use=0 ;
 	my $begin=0 ;
+	my $complete=0;
 	my $pod=0 ;
 	my $podnext=0 ;
 	my $no_embed=0 ;
@@ -5042,6 +5044,7 @@ print "_module_str($module, compress=$compress, embed_libs=$embed_libs)\n" if $t
 	my $varinit = 1 ;
 	my $varsdef = "" ;
 	my $line ;
+	my $current_len = 0 ;
 	
 	$asis = '@@ALWAYS-ASIS@@' if !$compress ;
 	
@@ -5051,6 +5054,8 @@ print "_module_str($module, compress=$compress, embed_libs=$embed_libs)\n" if $t
 
 print " : LINE: $line\n" if $this->{'debug'};
 print " (varinit=$varinit, pod=$pod)\n" if $this->{'debug'};
+
+		next if $complete ;
 
 		if ($line =~ /\@NO\-EMBED (\w+)/)
 		{
@@ -5099,6 +5104,7 @@ print " (varinit=$varinit, pod=$pod)\n" if $this->{'debug'};
 				{
 	print " + + embed $module\n" if $this->{'debug'} ;
 					$module_str .= "$module->import($import) ;\n" ;
+					$current_len = 0 ;
 					$this->_add_mod_lib($module, $libs_href) ;
 					next
 				}
@@ -5113,6 +5119,7 @@ print " (varinit=$varinit, pod=$pod)\n" if $this->{'debug'};
 			{
 				$asis = 0 ;
 				$module_str .= "$line\n" ;
+				$current_len = 0 ;
 print " + + line asis END\n" if $this->{'debug'};
 				next ;
 			}
@@ -5183,7 +5190,9 @@ print " + + ADD BEGIN:\n$varsdef\n" if $this->{'debug'};
 				$module_str .= $varsdef ;
 				$module_str .= "}\n" ;
 				$varsdef = "" ;
+				$current_len = 0 ;
 			}
+			$complete=1 ;
 			next ;
 		}
 
@@ -5227,21 +5236,30 @@ print " + + ADD BEGIN:\n$varsdef\n" if $this->{'debug'};
 		# Set embedded flag
 		$line =~ s/\$EMBEDDED = 0/\$EMBEDDED = 1/ ;
 
-#		# TODO: Sort this out......!
-#		# Set version
-#		$line =~ s/\$VERSION = \$VERSION/\$VERSION = "$VERSION"/ ;
+		}
+		
+		## ensure we're not at the line limit
+		my $line_len = length $line ;
+		if ($current_len + $line_len >= $MAX_LINE_LEN)
+		{
+			$module_str .= "\n" ;
+			$current_len = 0 ;
 		}
 		
 		## print it
 print " + + line ok\n" if $this->{'debug'};
 		$module_str .= "$line" ;
+		$current_len += $line_len ;
+
 		if ($asis || $comment)
 		{
 			$module_str .= "\n" ;
+			$current_len = 0 ;
 		}
 		else
 		{
 			$module_str .= " " ;
+			++$current_len ;
 		}
 	}
 	close $in_fh ;

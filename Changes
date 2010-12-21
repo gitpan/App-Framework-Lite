@@ -1,5 +1,9 @@
 Revision history for App-Framework-Lite
 
+1.07    Tue Dec 21 12:39:0 2010
+		Bug fix: Skip any module content after __END__
+		Limit line length to 5000 characters so that Clearcase does not treat script as binary
+
 1.06    Thu Mar 11 11:20:0 2010
 		Bug fix: Set the perl path as first line of output
 

@@ -192,9 +192,12 @@ sub check_new_version
 		## specify user name so that I can filter out my builds
 		my $user = $ENV{USER} || $ENV{USERNAME} || 'nobody' ;
 		
+		# CPAN testers
+		my $cpan = $ENV{'PERL5_CPAN_IS_RUNNING'}||0 ;
+
 		## check for OS-specific versions
 		my $os = $^O ;
-		my $url = "http://quartz.homelinux.com/CPAN/index.php?ver=$version&mod=$name&user=$user&os=$os" ;
+		my $url = "http://quartz.homelinux.com/CPAN/index.php?ver=$version&mod=$name&user=$user&os=$os&cpan=$cpan" ;
 		 
 		my $ua = LWP::UserAgent->new;
 		$ua->agent("CPAN-$name/$version") ;

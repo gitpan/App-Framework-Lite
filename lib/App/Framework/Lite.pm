@@ -930,7 +930,7 @@ use 5.008004;
 use strict ;
 
 
-our $VERSION = "1.07" ;
+our $VERSION = "1.08" ;
 
 
 #============================================================================================
@@ -5443,7 +5443,8 @@ $this->_dbg_prt([" + found $external_name in $package\n"], 2) ;
 		}
 		if ($type eq 'ARRAY')
 		{
-			if (defined(@alias))
+			# Modified from - if (defined(@alias)) - because of "deprecated" error message 
+			if (@alias)
 			{
 				$this->set($field_name => \@alias) ;
 			}

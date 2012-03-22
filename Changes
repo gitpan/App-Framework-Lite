@@ -1,5 +1,8 @@
 Revision history for App-Framework-Lite
 
+1.08    Thu Mar 22 08:05:0 2012
+		Fix: removed use of "defined(@array)" to eliminate Perl "deprecated" error message
+
 1.07    Tue Dec 21 12:39:0 2010
 		Bug fix: Skip any module content after __END__
 		Limit line length to 5000 characters so that Clearcase does not treat script as binary
